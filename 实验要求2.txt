@@ -1,0 +1,44 @@
+包含如下三个任务：
+
+### 任务一：自行设计 TilingData 结构体并实现 Tiling 函数
+
+根据算子原型与 Kernel 的实现需求，自行设计 `QmmCustomTilingData` 结构体，并实现 `CalcQmmTiling` 函数。Tiling 函数需根据输入的 M、N、K 维度，结合平台硬件资源（L1/L0A/L0B/UB 内存限制、可用核数），计算多核分块参数。可借助 `platform_ascendc::PlatformAscendCManager` 获取硬件信息。
+
+> **Tiling 设计提示**：
+> 
+> 设计 TilingData 时需要考虑以下要素：
+> 1. **`TCubeTiling`**：CANN Matmul 库提供的标准 Tiling 结构体，包含 M/N/K 的分块大小（`baseM`、`baseN`、`baseK`）、使用的核数（`usedCoreNum`）等字段。可通过 `GetMatmulTiling` API 自动计算。
+> 2. **`isPertoken`**：标记是否走反量化路径，用于 Kernel 内部分支选择。
+> 3. **`workspaceSize`**：Path 2 中 Cube 写入 INT32 中间结果所需的 GM workspace 大小。
+> 4. **多核分块策略**：将 M 维度或 N 维度分配到多个核上并行计算，每个核处理一个分块。分块大小需平衡 L1/L0A/L0B 缓存利用率与多核负载均衡。
+
+### 任务二：实现 A8W8 输入、INT32 输出的 Kernel
+
+实现 `QmmCubeBasicKernel` 类，完成纯 Cube 路径的 INT8 矩阵乘法计算。
+
+计算公式： ```result_int32 = x1_int8 @ x2_int8```
+
+### 任务三：实现 A8W8 输入、经 perChannelScale 和 perTokenScale 反量化输出 BF16 的 Kernel
+
+实现 `QmmPertokenKernel` 类，在 Cube 计算的基础上增加 Vector 反量化路径。
+
+计算公式： ```result_bf16 = (x1_int8 @ x2_int8) * perChannelScale * perTokenScale```
+
+其中 `perChannelScale` 沿 N 维广播，`perTokenScale` 沿 M 维广播，两者均为 FLOAT32 类型。
+
+---
+
+### 执行路径说明
+
+在 Host 侧的 `qmm_custom` 函数中，根据是否传入 `pertoken_scale` 设置 `isPertoken` 标志，Kernel 启动时据此选择执行路径：
+
+| 路径 | 条件 | 计算流程 | 输出类型 |
+|------|------|----------|----------|
+| **Path 1: Cube-only** | `isPertoken == 0` | INT8 matmul → INT32 | INT32 |
+| **Path 2: Cube+Vector** | `isPertoken == 1` | INT8 matmul → INT32 → dequant(scale×pertoken) → BF16 | BF16 |
+
+**Path 1（Cube-only）**：仅使用 AI Core 的 Cube 计算单元，完成 INT8×INT8 矩阵乘法后直接将 INT32 结果写入输出 GM，无 Vector 参与。对应 `QmmCubeBasicKernel` 的实现。
+
+**Path 2（Cube+Vector）**：Cube 单元先完成 INT8 matmul 得到 INT32 中间结果并写入 GM workspace；随后 Vector 单元从 GM 读取 INT32 结果，依次完成 `Cast`（INT32→FLOAT32）、乘以 `perChannelScale` 和 `perTokenScale`、`Cast`（FLOAT32→BF16）等反量化操作，最终将 BF16 结果写入输出 GM。对应 `QmmPertokenKernel` 的实现。
+
+Kernel 入口函数 `qmm_custom_kernel` 使用 `__mix__(1, 2)` 属性声明，表示为每个 Block 分配 1 个 Cube 核和 2 个 Vector 核，使 Cube 与 Vector 可在同一 Kernel 中协同工作。Kernel 内部通过 `tilingData.isPertoken` 判断走哪条路径，两条路径复用相同的 Tiling 结构和 Kernel 启动入口。

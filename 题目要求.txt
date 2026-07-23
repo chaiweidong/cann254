@@ -1,0 +1,114 @@
+题目内容
+描述
+QmmCustom 算子赛题
+一、赛题背景
+QmmCustom是面向大语言模型（LLM）推理场景的INT8量化矩阵乘法算子。在LLM推理中，权重和激活通常被量化为INT8以降低显存占用并提升计算吞吐，量化矩阵乘法是线性层（Linear Layer）的核心计算单元。
+
+本题要求基于INT8量化矩阵乘法的核心业务逻辑，采用Ascend C编程语言进行算子原生开发，在昇腾NPU硬件上实现一款高性能、高精度的QmmCustom算子，充分利用Cube核的矩阵乘加能力和Vector核的反量化能力。
+
+二、算子功能描述
+QmmCustom算子接收INT8量化的激活矩阵和权重矩阵，执行矩阵乘法。根据是否提供pertoken_scale输入，算子有两种工作模式：
+
+非pertoken模式（不提供pertoken_scale）：仅执行INT8矩阵乘法，输出INT32结果
+pertoken模式（提供pertoken_scale）：在INT8矩阵乘法基础上，对结果进行per-channel和per-token反量化，输出BFLOAT16浮点结果
+算子支持INT8输入和INT32/BFLOAT16输出，权重矩阵x2采用FRACTAL_NZ格式存储以匹配Cube核原生排布，需兼容M维度非32整倍数的非对齐场景。
+
+三、核心定义与约束
+3.1 输入输出与属性总览
+类型	参数名	类型	维度形状	支持数据类型	数据格式	备注
+INPUT（必选）	x1	tensor	[M, K]	int8	ND	量化激活矩阵A
+INPUT（必选）	x2	tensor	[K, N]	int8	FRACTAL_NZ	量化权重矩阵B（NZ排布）
+INPUT（必选）	scale	tensor	[N]	float32	ND	per-channel反量化缩放因子
+INPUT（可选）	pertoken_scale	tensor	[M]	float32	ND	per-token反量化缩放因子
+OUTPUT（输出）	y	tensor	[M, N]	bfloat16/int32	ND	输出结果（有pertoken_scale→BF16，无→INT32）
+3.3 关键输入约束
+维度取值范围（均为正整数）：
+M ∈ [1, 4096]，表示激活矩阵的行数（token数）
+K ∈ [4096, 12288]，表示缩减维度（隐藏层维度）
+N ∈ [4096, 24576]，表示输出维度
+非对齐场景兼容：M均可能为非32的整倍数，算子需适配内存/数据非 32 字节对齐的场景
+数值取值约束：int8输入取值范围[-128, 127]，float32缩放因子取值范围[-1, 1]
+格式约束：x2使用FRACTAL_NZ格式存储，这是Ascend Cube核的原生矩阵排布格式；其他张量均使用ND格式
+注意：由于当前平台能力存在约束，参赛者在实现核函数时需将x2作为FRACTAL_NZ格式进行处理，但在Host侧算子原型定义中仍然声明为ND格式
+数据类型约束：x1和x2为int8，scale和pertoken_scale为float32
+输出类型约束：无pertoken_scale时输出int32，有pertoken_scale时输出bfloat16
+3.4 数学公式与计算规则
+基础公式 ：
+非pertoken模式：
+\[ y[m, n] = \sum_{k=0}^{K-1} x_1[m, k] \times x_2[k, n] \tag{INT32} \]
+pertoken模式：
+\[ y[m,n] = \text{BF16} \left( \left( \sum_{k=0}^{K-1} x_1[m,k] \times x_2[k,n] \right) \times \text{scale}[n] \times \text{pertoken\_scale}[m] \right) \quad (\text{BFLOAT16}) \]
+计算步骤 （pertoken模式）：
+执行INT8×INT8→INT32矩阵乘法，得到中间结果C[m, n]
+将C与scale[n]逐列相乘（per-channel反量化）
+将结果与pertoken_scale[m]逐行相乘（per-token反量化）
+将FLOAT32结果转换为BFLOAT16输出
+精度要求 ：计算结果需满足以下精度误差要求：
+int32：要求计算结果完全准确，无误差
+bfloat16：相对误差 < 1e-2，绝对误差 < 1e-2
+3.5 输出要求
+形状约束 ：输出张量形状为[M, N]，与矩阵乘法结果一致
+类型约束 ：无pertoken_scale时输出int32，有pertoken_scale时输出bfloat16
+数值范围 ：非pertoken模式为INT8乘加的INT32累加结果；pertoken模式为反量化后的BFLOAT16浮点结果
+四、规则要求
+格式要求 ：x2必须作为FRACTAL_NZ格式进行处理，由于当前平台能力存在约束，在Host侧算子原型定义（OpDef）中仍然声明为ND格式
+精度要求 ：计算结果需满足以下精度误差要求：
+int32：要求计算结果完全准确，无误差
+bfloat16：相对误差 < 1e-2，绝对误差 < 1e-2
+性能要求 ：在保证数值精度和正确性的前提下，优化计算性能，充分利用NPU硬件特性：
+利用Cube核的INT8矩阵乘加能力
+pertoken模式下利用Cube-Vector流水并行，Cube核计算矩阵乘法，Vector核执行反量化
+合理进行多核切分，充分发挥并行计算能力
+合理管理workspace，pertoken模式需额外workspace存放Cube中间结果
+五、示例说明
+示例 1：非pertoken模式（INT32输出）
+输入x1：tensor([[1, 2, 3], [4, 5, 6]])，dtype=int8，shape=[2, 3]
+输入x2：tensor([[7, 8], [9, 10], [11, 12]])，dtype=int8，shape=[3, 2]
+输入scale：tensor([0.01, 0.02])，dtype=float32，shape=[2]
+输入pertoken_scale：未提供
+
+输出y：tensor([[58, 64], [139, 154]])，dtype=int32，shape=[2, 2]
+
+结果解释：执行INT8矩阵乘法，1×7+2×9+3×11=58，1×8+2×10+3×12=64，4×7+5×9+6×11=139，4×8+5×10+6×12=154
+
+示例 2：pertoken模式（BF16输出）
+输入x1：tensor([[1, 2, 3], [4, 5, 6]])，dtype=int8，shape=[2, 3]
+输入x2：tensor([[7, 8], [9, 10], [11, 12]])，dtype=int8，shape=[3, 2]
+输入scale：tensor([0.01, 0.02])，dtype=float32，shape=[2]
+输入pertoken_scale：tensor([2.0, 3.0])，dtype=float32，shape=[2]
+
+中间结果C = matmul(x1, x2)：
+[[58, 64],
+[139, 154]]
+
+反量化计算：
+y[0,0] = BF16(58 × 0.01 × 2.0) = BF16(1.16)
+y[0,1] = BF16(64 × 0.02 × 2.0) = BF16(2.56)
+y[1,0] = BF16(139 × 0.01 × 3.0) = BF16(4.17)
+y[1,1] = BF16(154 × 0.02 × 3.0) = BF16(9.24)
+
+输出y：tensor([[1.16, 2.56], [4.17, 9.24]])，dtype=bfloat16，shape=[2, 2]
+
+结果解释：矩阵乘法结果经per-channel（scale）和per-token（pertoken_scale）反量化后转为BF16
+
+六、测试用例覆盖范围
+数据类型覆盖 ：int8输入、float32缩放因子、int32和bfloat16输出
+维度场景覆盖 ：
+单token推理：M=1
+批量推理：M=50
+大批量推理：M=4096
+不同K维度：K=4096、K=12288
+不同N维度：N=4096、N=6144、N=24576
+非对齐场景：M=1、M=50为非32整倍数的内存非对齐场景
+模式覆盖 ：
+非pertoken模式：INT32输出
+pertoken模式：BFLOAT16输出
+边界场景覆盖 ：
+最小M：M=1（单token推理）
+最大M：M=4096
+大K维度：K=12288
+大N维度：N=24576
+大矩阵：[4096, 4096] × [4096, 4096]
+精度场景覆盖 ：
+int32输出：精确匹配验证
+bfloat16输出：验证1e-2精度要求

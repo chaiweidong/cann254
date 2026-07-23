@@ -1,0 +1,115 @@
+{
+ "binFileName": "QmmCustom_a85df395ac5d0c4f7fc9465ac1e8ab36",
+ "binFileSuffix": ".o",
+ "blockDim": -1,
+ "coreType": "VectorCore",
+ "core_type": "AIV",
+ "intercoreSync": 0,
+ "kernelName": "QmmCustom_a85df395ac5d0c4f7fc9465ac1e8ab36",
+ "magic": "RT_DEV_BINARY_MAGIC_ELF_AIVEC",
+ "memoryStamping": [],
+ "opParaSize": 244,
+ "parameters": [
+  null,
+  null,
+  null,
+  null,
+  null,
+  null
+ ],
+ "sha256": "d68fedd1d49983b809a06bedc7c5c31765b3009f3955f72f217307f471ebb966",
+ "workspace": {
+  "num": 1,
+  "size": [
+   -1
+  ],
+  "type": [
+   0
+  ]
+ },
+ "kernelList": [
+  {
+   "kernelName": "QmmCustom_a85df395ac5d0c4f7fc9465ac1e8ab36_2"
+  }
+ ],
+ "optionalInputMode": "gen_placeholder",
+ "optionalOutputMode": "gen_placeholder",
+ "supportSuperKernel": 1,
+ "compileInfo": {},
+ "supportInfo": {
+  "implMode": "high_performance",
+  "int64Mode": false,
+  "simplifiedKeyMode": 0,
+  "simplifiedKey": [
+   "QmmCustom/d=0,p=1/2,2/2,2/0,2/27,2",
+   "QmmCustom/d=0,p=0/2,2/2,2/0,2/27,2",
+   "QmmCustom/d=1,p=1/2,2/2,2/0,2/27,2",
+   "QmmCustom/d=1,p=0/2,2/2,2/0,2/27,2"
+  ],
+  "optionalInputMode": "gen_placeholder",
+  "optionalOutputMode": "gen_placeholder",
+  "staticKey": "3147585dc8fee7a41e591f0afcb1d3e9b9b6cf3388abf475f23a77ae7bd0254f,f2638046cee5d07afc614392fadf7b4f1aea70b8c402d2836f8aac58c1360ec3",
+  "inputs": [
+   {
+    "name": "x1",
+    "index": 0,
+    "dtype": "int8",
+    "format": "ND",
+    "paramType": "required",
+    "shape": [
+     -2
+    ],
+    "format_match_mode": "FormatAgnostic"
+   },
+   {
+    "name": "x2",
+    "index": 1,
+    "dtype": "int8",
+    "format": "ND",
+    "paramType": "required",
+    "shape": [
+     -2
+    ],
+    "format_match_mode": "FormatAgnostic"
+   },
+   {
+    "name": "scale",
+    "index": 2,
+    "dtype": "float32",
+    "format": "ND",
+    "paramType": "required",
+    "shape": [
+     -2
+    ],
+    "format_match_mode": "FormatAgnostic"
+   },
+   {
+    "name": "pertoken_scale",
+    "index": 3,
+    "dtype": "float32",
+    "format": "ND",
+    "paramType": "optional",
+    "shape": [
+     -2
+    ],
+    "format_match_mode": "FormatAgnostic"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "y",
+    "index": 0,
+    "dtype": "bfloat16",
+    "format": "ND",
+    "paramType": "required",
+    "shape": [
+     -2
+    ],
+    "format_match_mode": "FormatAgnostic"
+   }
+  ],
+  "opMode": "dynamic",
+  "deterministic": "ignore"
+ },
+ "filePath": "ascend910b/qmm_custom/QmmCustom_a85df395ac5d0c4f7fc9465ac1e8ab36.json"
+}
